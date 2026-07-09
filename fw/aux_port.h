@@ -40,6 +40,7 @@
 #include "fw/math.h"
 #include "fw/orbis.h"
 #include "fw/ma732.h"
+#include "fw/safe_spi.h"
 #include "fw/mbed_util.h"
 #include "fw/millisecond_timer.h"
 #include "fw/moteus_hw.h"
@@ -143,6 +144,10 @@ class AuxPort {
           ic_pz_->ISR_StartSample();
           break;
         }
+        case SampleType::kSafeSpi: {
+          safe_spi_->ISR_StartSample();
+          break;
+        }
         case SampleType::kNone: {
           return;
         }
@@ -231,6 +236,10 @@ class AuxPort {
         }
         case SampleType::kOrbis: {
           orbis_->ISR_Update(&status_.spi);
+          break;
+        }
+        case SampleType::kSafeSpi: {
+          safe_spi_->ISR_MaybeFinishSample(&status_.spi);
           break;
         }
         case SampleType::kI2c: {
@@ -454,6 +463,7 @@ class AuxPort {
     kPwmInput = 12,
     kBissC = 13,
     kOrbis = 14,
+    kSafeSpi = 15,
 
     kLastEntry,
   };
@@ -859,6 +869,7 @@ class AuxPort {
     bissc_.reset();
     ic_pz_.reset();
     orbis_.reset();
+    safe_spi_.reset();
 
     // Notify that uart_micro_server is about to go away.
     if (uart_server_changed_callback_) {
@@ -1106,6 +1117,17 @@ class AuxPort {
           options.rx_dma = dma_channels_[0];
           options.tx_dma = dma_channels_[1];
           orbis_.emplace(options);
+          break;
+        }
+        case aux::Spi::Config::kSafeSpi: {
+          SafeSpi::Options options{spi_options};
+          // The SafeSPI interface supports 10MHz typical, 12.5MHz
+          // maximum.
+          if (options.frequency > 10000000) { options.frequency = 10000000; }
+          options.timeout = 2000;
+          options.rx_dma = dma_channels_[0];
+          options.tx_dma = dma_channels_[1];
+          safe_spi_.emplace(options);
           break;
         }
         case aux::Spi::Config::kMa732: {
@@ -1421,6 +1443,7 @@ class AuxPort {
 
     if (ic_pz_) { AddSampleType(SampleType::kIcPz, true, true); }
     if (orbis_) { AddSampleType(SampleType::kOrbis, false, true); }
+    if (safe_spi_) { AddSampleType(SampleType::kSafeSpi, true, true); }
     if (status_.gpio_bit_active != 0) {
       AddSampleType(SampleType::kGpio, false, true);
     }
@@ -1525,6 +1548,7 @@ class AuxPort {
 
   std::optional<IcPz> ic_pz_;
   std::optional<Orbis> orbis_;
+  std::optional<SafeSpi> safe_spi_;
   std::optional<DigitalOut> onboard_cs_;
 
   std::array<std::optional<DigitalIn>,
