@@ -101,10 +101,10 @@ Using `utils/tview.py` or `moteus_tool`, with the sensor on aux2 and
 (for example) pins 0-3 as CS/SCK/MOSI/MISO:
 
 ```
-conf set aux2.pins.0.mode 2    # spi_cs
-conf set aux2.pins.1.mode 1    # spi (SCK)
-conf set aux2.pins.2.mode 1    # spi (MOSI)
-conf set aux2.pins.3.mode 1    # spi (MISO)
+conf set aux2.pins.0.mode 1    # SCK
+conf set aux2.pins.1.mode 1    # MISO
+conf set aux2.pins.2.mode 1    # MOSI
+conf set aux2.pins.3.mode 2    # CS
 conf set aux2.spi.mode 10      # safe_spi
 conf set aux2.spi.rate_hz 10000000
 
