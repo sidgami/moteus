@@ -29,6 +29,12 @@
 ///   [28:3]  N/A
 ///   [2:0]   CRC-3
 ///
+/// For register access commands (kReadRegister, kWriteRegister,
+/// kBurstWrite), a 16-bit payload occupies bits [18:3] of the MOSI
+/// frame (RAA2P3200 programming manual R36UZ0041ED0100, Figures 17
+/// and 19): the register address for a read or for the first frame of
+/// a write, and the register data for the second frame of a write.
+///
 /// MISO (sensor response) frame:
 ///   [31]    D - 1 if the response contains sensor data
 ///   [30:28] Command echo
@@ -78,6 +84,30 @@ inline uint8_t SafeSpiComputeCrc3(uint32_t frame) {
 // N/A and payload bits set to 0.
 inline uint32_t SafeSpiMakeCommandFrame(SafeSpiCommand command) {
   const uint32_t frame = static_cast<uint32_t>(command) << 29;
+  return frame | SafeSpiComputeCrc3(frame);
+}
+
+// Construct a complete 32 bit register access command frame,
+// including CRC, with the given 16-bit payload (register address or
+// register data) in bits [18:3].
+inline uint32_t SafeSpiMakeRegisterFrame(SafeSpiCommand command,
+                                         uint16_t payload) {
+  const uint32_t frame =
+      (static_cast<uint32_t>(command) << 29) |
+      (static_cast<uint32_t>(payload) << 3);
+  return frame | SafeSpiComputeCrc3(frame);
+}
+
+// As SafeSpiMakeRegisterFrame, but additionally place a 10-bit value
+// in the bits [28:19] that the datasheet figures label N/A, for
+// experimentation with undocumented addressing/keying requirements.
+inline uint32_t SafeSpiMakeRegisterFrameNa(SafeSpiCommand command,
+                                           uint16_t na10,
+                                           uint16_t payload) {
+  const uint32_t frame =
+      (static_cast<uint32_t>(command) << 29) |
+      (static_cast<uint32_t>(na10 & 0x3ff) << 19) |
+      (static_cast<uint32_t>(payload) << 3);
   return frame | SafeSpiComputeCrc3(frame);
 }
 

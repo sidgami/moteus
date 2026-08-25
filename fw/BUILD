@@ -120,6 +120,8 @@ MOTEUS_SOURCES = [
     "ma732.h",
     "orbis.h",
     "safe_spi.h",
+    "safe_spi_boot_entry.h",
+    "safe_spi_boot_entry.cc",
     "safe_spi_frame.h",
     "moteus_controller.h",
     "moteus_controller.cc",

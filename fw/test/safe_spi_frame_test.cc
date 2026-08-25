@@ -78,6 +78,34 @@ BOOST_AUTO_TEST_CASE(SafeSpiCommandFrame) {
   BOOST_TEST(SafeSpiComputeCrc3(read_frame) == 0);
 }
 
+BOOST_AUTO_TEST_CASE(SafeSpiRegisterFrame) {
+  // A register read carries the address in bits [18:3].
+  {
+    const uint32_t frame = SafeSpiMakeRegisterFrame(
+        SafeSpiCommand::kReadRegister, 0x001c);
+    BOOST_TEST((frame >> 29) == 0b001u);
+    BOOST_TEST(((frame >> 3) & 0xffffu) == 0x001cu);
+    BOOST_TEST(SafeSpiComputeCrc3(frame) == 0);
+  }
+  // A register write data frame carries the data in the same bits.
+  {
+    const uint32_t frame = SafeSpiMakeRegisterFrame(
+        SafeSpiCommand::kWriteRegister, 0xbeef);
+    BOOST_TEST((frame >> 29) == 0b010u);
+    BOOST_TEST(((frame >> 3) & 0xffffu) == 0xbeefu);
+    BOOST_TEST(SafeSpiComputeCrc3(frame) == 0);
+  }
+  // Payload extremes still produce valid CRCs and no bit leakage
+  // into the command or CRC fields.
+  for (const uint16_t payload : {uint16_t(0x0000), uint16_t(0xffff)}) {
+    const uint32_t frame = SafeSpiMakeRegisterFrame(
+        SafeSpiCommand::kBurstWrite, payload);
+    BOOST_TEST((frame >> 29) == 0b011u);
+    BOOST_TEST(((frame >> 3) & 0xffffu) == payload);
+    BOOST_TEST(SafeSpiComputeCrc3(frame) == 0);
+  }
+}
+
 BOOST_AUTO_TEST_CASE(SafeSpiParseValidPosition) {
   const uint32_t frame = MakeMisoFrame(true, 0b000, 0, 0x1234, 0);
   const auto result = SafeSpiParseFrame(frame);
