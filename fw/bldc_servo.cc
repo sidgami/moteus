@@ -326,7 +326,14 @@ class BldcServo::Impl : public BldcServoControl<BldcServo::Impl> {
     pwm_derate_ = (static_cast<float>(config_.pwm_rate_hz) / 30000.0f);
 
     fet_thermistor_.Reset(47000.0f);
+#ifdef MOTEUS_MOTOR_PT1000
+    // pgn-dev c1-modified: 6.8k pullup, PT1000 to ground.  The
+    // sensor's R0 is fixed at 1000 ohm, so motor_thermistor_ohm is
+    // ignored.
+    motor_thermistor_.Reset(6800.0f);
+#else
     motor_thermistor_.Reset(config_.motor_thermistor_ohm);
+#endif
     motor_position_->SetRate(rate_config_.period_s);
 
     UpdateDerivedMotorConstants();
@@ -927,6 +934,22 @@ class BldcServo::Impl : public BldcServoControl<BldcServo::Impl> {
     ADC4->ISR |= (ADC_ISR_EOSMP | ADC_ISR_EOS);
     ADC5->ISR |= (ADC_ISR_EOSMP | ADC_ISR_EOS);
 
+#ifdef MOTEUS_MOTOR_PT1000
+    if (family1or2or3_) {
+      // pgn-dev c1-modified: motor temperature (PB14) is on ADC4
+      // along with the FET temperature, so ADC4 alternates between
+      // the two and ADC5 stays on voltage sense every cycle.
+      status_.adc_voltage_sense_raw = ADC5->DR;
+      if (adc5_phase_ == 0) {
+        status_.adc_fet_temp_raw = ADC4->DR;
+        ADC4->SQR1 = (0 << ADC_SQR1_L_Pos) | (msense_sqr_ << ADC_SQR1_SQ1_Pos);
+      } else {
+        status_.adc_motor_temp_raw = ADC4->DR;
+        ADC4->SQR1 = (0 << ADC_SQR1_L_Pos) | (tsense_sqr_ << ADC_SQR1_SQ1_Pos);
+      }
+      adc5_phase_ = 1 - adc5_phase_;
+    } else {
+#endif
     // Read ADC4 (same every cycle)
     if (family0_rev4_and_older_) {
       status_.adc_motor_temp_raw = ADC4->DR;
@@ -965,6 +988,9 @@ class BldcServo::Impl : public BldcServoControl<BldcServo::Impl> {
       }
     }
     adc5_phase_ = 1 - adc5_phase_;
+#ifdef MOTEUS_MOTOR_PT1000
+    }
+#endif
 
 #ifdef MOTEUS_PERFORMANCE_MEASURE
     status_.dwt.start_pos_sample = DWT->CYCCNT;
@@ -1389,7 +1415,11 @@ class BldcServo::Impl : public BldcServoControl<BldcServo::Impl> {
   uint32_t lptim1_sngstrt_value_ = 0;
 
   Thermistor fet_thermistor_;
+#ifdef MOTEUS_MOTOR_PT1000
+  Pt1000 motor_thermistor_;
+#else
   Thermistor motor_thermistor_;
+#endif
 
   CommandData data_buffers_[2] = {};
 

@@ -364,6 +364,13 @@ MoteusHwPins FindHardwarePins(FamilyAndVersion fv) {
     } else if (fv.family == 2) {
       // moteus-c1
 
+#ifdef MOTEUS_MOTOR_PT1000
+      // pgn-dev c1-modified: VTEMP_MOT moved from PA8 (ADC5_IN1) to
+      // PB14 (ADC4_IN4).  The divider is a 6.8k pullup with the
+      // PT1000 to ground.
+      result.msense = PB_14_ALT0;   // ADC4_IN4
+#endif
+
       result.power_P_l_W = 250.0f;
       result.power_V_l = 28.0f;
 
