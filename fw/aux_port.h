@@ -40,6 +40,8 @@
 #include "fw/math.h"
 #include "fw/orbis.h"
 #include "fw/ma732.h"
+#include "fw/safe_spi.h"
+#include "fw/safe_spi_boot_entry.h"
 #include "fw/mbed_util.h"
 #include "fw/millisecond_timer.h"
 #include "fw/moteus_hw.h"
@@ -143,6 +145,10 @@ class AuxPort {
           ic_pz_->ISR_StartSample();
           break;
         }
+        case SampleType::kSafeSpi: {
+          safe_spi_->ISR_StartSample();
+          break;
+        }
         case SampleType::kNone: {
           return;
         }
@@ -231,6 +237,10 @@ class AuxPort {
         }
         case SampleType::kOrbis: {
           orbis_->ISR_Update(&status_.spi);
+          break;
+        }
+        case SampleType::kSafeSpi: {
+          safe_spi_->ISR_MaybeFinishSample(&status_.spi);
           break;
         }
         case SampleType::kI2c: {
@@ -454,6 +464,7 @@ class AuxPort {
     kPwmInput = 12,
     kBissC = 13,
     kOrbis = 14,
+    kSafeSpi = 15,
 
     kLastEntry,
   };
@@ -609,6 +620,189 @@ class AuxPort {
         fmt("%02X", data[i]);
       }
       fmt("\r\nOK\r\n");
+      WriteMessage(response, std::string_view(emit_line_, pos));
+      return;
+    }
+
+    if (cmd_text == "sspi-rd") {
+      if (!safe_spi_) {
+        WriteMessage(response, "ERR no SafeSPI setup\r\n");
+        return;
+      }
+
+      const auto reg = ParseHexWord(tokenizer.next());
+      if (reg < 0) {
+        WriteMessage(response, "ERR invalid reg\r\n");
+        return;
+      }
+
+      if (!safe_spi_->StartRegisterRead(reg)) {
+        WriteMessage(response, "ERR busy\r\n");
+        return;
+      }
+
+      WriteOk(response);
+      return;
+    }
+
+    if (cmd_text == "sspi-wr") {
+      if (!safe_spi_) {
+        WriteMessage(response, "ERR no SafeSPI setup\r\n");
+        return;
+      }
+
+      const auto reg = ParseHexWord(tokenizer.next());
+      const auto data = ParseHexWord(tokenizer.next());
+      if (reg < 0 || data < 0) {
+        WriteMessage(response, "ERR invalid reg/data\r\n");
+        return;
+      }
+
+      if (!safe_spi_->StartRegisterWrite(reg, data)) {
+        WriteMessage(response, "ERR busy\r\n");
+        return;
+      }
+
+      WriteOk(response);
+      return;
+    }
+
+    if (cmd_text == "sspi-bw") {
+      if (!safe_spi_) {
+        WriteMessage(response, "ERR no SafeSPI setup\r\n");
+        return;
+      }
+
+      const auto reg = ParseHexWord(tokenizer.next());
+      const auto data = ParseHexWord(tokenizer.next());
+      if (reg < 0 || data < 0) {
+        WriteMessage(response, "ERR invalid reg/data\r\n");
+        return;
+      }
+
+      if (!safe_spi_->StartBurstWrite(reg, data)) {
+        WriteMessage(response, "ERR busy\r\n");
+        return;
+      }
+
+      WriteOk(response);
+      return;
+    }
+
+    if (cmd_text == "sspi-entry") {
+      if (!safe_spi_) {
+        WriteMessage(response, "ERR no SafeSPI setup\r\n");
+        return;
+      }
+
+      if (!safe_spi_->StartProgrammingModeEntry()) {
+        WriteMessage(response, "ERR busy\r\n");
+        return;
+      }
+
+      WriteOk(response);
+      return;
+    }
+
+    if (cmd_text == "sspi-raw") {
+      if (!safe_spi_) {
+        WriteMessage(response, "ERR no SafeSPI setup\r\n");
+        return;
+      }
+
+      const auto hi = ParseHexWord(tokenizer.next());
+      const auto lo = ParseHexWord(tokenizer.next());
+      if (hi < 0 || lo < 0) {
+        WriteMessage(response, "ERR invalid frame\r\n");
+        return;
+      }
+
+      const uint32_t frame =
+          (static_cast<uint32_t>(hi) << 16) | static_cast<uint32_t>(lo);
+      if (!safe_spi_->StartRawFrame(frame)) {
+        WriteMessage(response, "ERR busy\r\n");
+        return;
+      }
+
+      WriteOk(response);
+      return;
+    }
+
+    if (cmd_text == "sspi-trace") {
+      if (!safe_spi_) {
+        WriteMessage(response, "ERR no SafeSPI setup\r\n");
+        return;
+      }
+
+      const uint32_t* trace = safe_spi_->trace();
+      ssize_t pos = 0;
+      for (size_t i = 0; i < SafeSpi::kTraceSize; i++) {
+        pos += snprintf(&emit_line_[pos], sizeof(emit_line_) - pos,
+                        "%08lX ", static_cast<unsigned long>(trace[i]));
+      }
+      pos += snprintf(&emit_line_[pos], sizeof(emit_line_) - pos, "\r\nOK\r\n");
+      WriteMessage(response, std::string_view(emit_line_, pos));
+      return;
+    }
+
+    if (cmd_text == "sspi-res") {
+      if (!safe_spi_) {
+        WriteMessage(response, "ERR no SafeSPI setup\r\n");
+        return;
+      }
+
+      const auto result = safe_spi_->register_result();
+      if (!result) {
+        WriteMessage(response, "ERR not ready\r\n");
+        return;
+      }
+      if (!result->ok) {
+        WriteMessage(response, "ERR timeout\r\n");
+        return;
+      }
+
+      const int pos = snprintf(
+          emit_line_, sizeof(emit_line_),
+          "cmd=%d data=%04X f%d/%04X p%d/%04X\r\nOK\r\n",
+          result->command, result->data,
+          result->first_command, result->first_data,
+          result->pre_command, result->pre_data);
+      WriteMessage(response, std::string_view(emit_line_, pos));
+      return;
+    }
+
+    if (cmd_text == "sspi-boot") {
+      const auto& r = g_safe_spi_boot_entry;
+      const int pos = snprintf(
+          emit_line_, sizeof(emit_line_),
+          "ran=%d conf=%d rb=%04X wake=%lu a0=%d ini=%d "
+          "wr=%lu t=%lu tw=%04X n=%d\r\nOK\r\n",
+          r.ran, r.confirmed, r.last_readback,
+          static_cast<unsigned long>(r.wake_us),
+          r.alive_at_start, r.init_seen,
+          static_cast<unsigned long>(r.write_attempts),
+          static_cast<unsigned long>(r.confirm_elapsed_us),
+          r.test_write_readback, r.rx_count);
+      WriteMessage(response, std::string_view(emit_line_, pos));
+      return;
+    }
+
+    if (cmd_text == "sspi-boot-rx") {
+      const auto index_str = tokenizer.next();
+      const long start =
+          index_str.empty() ? 0 : std::strtol(index_str.data(), nullptr, 0);
+      const auto& r = g_safe_spi_boot_entry;
+      ssize_t pos = 0;
+      for (long i = start;
+           i < start + 4 &&
+               i < static_cast<long>(SafeSpiBootEntryResult::kNumSamples);
+           i++) {
+        pos += snprintf(&emit_line_[pos], sizeof(emit_line_) - pos,
+                        "%lu:%08lX ",
+                        static_cast<unsigned long>(r.rx_us[i]),
+                        static_cast<unsigned long>(r.rx[i]));
+      }
+      pos += snprintf(&emit_line_[pos], sizeof(emit_line_) - pos, "\r\nOK\r\n");
       WriteMessage(response, std::string_view(emit_line_, pos));
       return;
     }
@@ -859,6 +1053,7 @@ class AuxPort {
     bissc_.reset();
     ic_pz_.reset();
     orbis_.reset();
+    safe_spi_.reset();
 
     // Notify that uart_micro_server is about to go away.
     if (uart_server_changed_callback_) {
@@ -1106,6 +1301,17 @@ class AuxPort {
           options.rx_dma = dma_channels_[0];
           options.tx_dma = dma_channels_[1];
           orbis_.emplace(options);
+          break;
+        }
+        case aux::Spi::Config::kSafeSpi: {
+          SafeSpi::Options options{spi_options};
+          // The SafeSPI interface supports 10MHz typical, 12.5MHz
+          // maximum.
+          if (options.frequency > 10000000) { options.frequency = 10000000; }
+          options.timeout = 2000;
+          options.rx_dma = dma_channels_[0];
+          options.tx_dma = dma_channels_[1];
+          safe_spi_.emplace(options);
           break;
         }
         case aux::Spi::Config::kMa732: {
@@ -1421,6 +1627,7 @@ class AuxPort {
 
     if (ic_pz_) { AddSampleType(SampleType::kIcPz, true, true); }
     if (orbis_) { AddSampleType(SampleType::kOrbis, false, true); }
+    if (safe_spi_) { AddSampleType(SampleType::kSafeSpi, true, true); }
     if (status_.gpio_bit_active != 0) {
       AddSampleType(SampleType::kGpio, false, true);
     }
@@ -1505,6 +1712,19 @@ class AuxPort {
     return (high << 4) | low;
   }
 
+  // Parse 1-4 hex characters into a 16 bit value.  Returns -1 on
+  // error.
+  static int32_t ParseHexWord(const std::string_view& str) {
+    if (str.empty() || str.size() > 4) { return -1; }
+    int32_t result = 0;
+    for (const char c : str) {
+      const int nybble = ParseHexNybble(c);
+      if (nybble < 0) { return -1; }
+      result = (result << 4) | nybble;
+    }
+    return result;
+  }
+
   Config config_;
   Status status_;
 
@@ -1525,6 +1745,7 @@ class AuxPort {
 
   std::optional<IcPz> ic_pz_;
   std::optional<Orbis> orbis_;
+  std::optional<SafeSpi> safe_spi_;
   std::optional<DigitalOut> onboard_cs_;
 
   std::array<std::optional<DigitalIn>,
@@ -1556,7 +1777,7 @@ class AuxPort {
   int sine_pin_ = -1;
   int cosine_pin_ = -1;
 
-  char emit_line_[48] = {};
+  char emit_line_[96] = {};
 
   std::optional<Stm32I2c> i2c_;
 

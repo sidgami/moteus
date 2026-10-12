@@ -406,6 +406,9 @@ The type of SPI device.
 * 5 - MA600 (CPR == 65536)
 * 8 - AMT22 (CPR == 16384)
 * 9 - RLS Orbis (CPR == 16384)
+* 10 - SafeSPI absolute encoder, e.g. sensors based on the Renesas
+  RAA2P3200 (14-bit position in a 16-bit data field, see
+  [guides/safe-spi-encoder.md](../guides/safe-spi-encoder.md))
 
 NOTE: iC-PZ devices require significant configuration and calibration
 before use.  Diagnostic mode commands are provided for low level
